@@ -14,7 +14,7 @@
 const $=id=>document.getElementById(id), buttons=[...document.querySelectorAll('[data-keys]')];
 if(location.hash.length>1){localStorage.setItem('sonyRemote',location.hash.slice(1));history.replaceState(null,'',location.pathname)}
 async function bridge(){if(location.hostname!=='faheemdehalvi.github.io')return '';const r=await fetch('./bridge.json?t='+Math.floor(Date.now()/15000),{cache:'no-store'});if(!r.ok)throw Error('Mac relay address is unavailable.');return (await r.json()).url}
-async function api(path,data={}){const base=await bridge();const res=await fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(localStorage.getItem('sonyRemote')||'')},body:JSON.stringify(data)});const result=await res.json();if(!res.ok)throw Error(result.error||'Request failed');return result}
+async function api(path,data={}){const base=await bridge();const res=await fetch(base+'/api/'+path,{method:'POST',headers:{'Content-Type':'application/json',Authorization:'Bearer '+(localStorage.getItem('sonyRemote')||'')},body:JSON.stringify(data)});const result=await res.json();if(!res.ok){const e=Error(result.error||'Request failed');e.status=res.status;throw e}return result}
 const report=m=>$('feedback').textContent=m;
 function render(state){$('status').textContent=state.ip?'Paired · '+state.ip:'Waiting for TV';$('setup').open=!state.ip;if(state.ip)$('ip').value=state.ip;
 for(const b of buttons){b.dataset.command=b.dataset.keys.split('|').find(k=>state.buttons.includes(k))||'';b.disabled=!b.dataset.command}
@@ -26,5 +26,19 @@ $('find').onclick=async()=>{$('find').disabled=true;report('Looking for Sony TVs
 document.addEventListener('keydown',e=>{if(e.altKey||e.ctrlKey||e.metaKey||e.shiftKey||e.target.closest('input,select,button,summary,form'))return;const key={ArrowUp:'Up',ArrowDown:'Down',ArrowLeft:'Left',ArrowRight:'Right',Enter:'Confirm',Escape:'Return'}[e.key];if(!key)return;const b=buttons.find(x=>x.dataset.keys.split('|').includes(key));if(b&&!b.disabled){e.preventDefault();b.click()}});
 $('unlock').onsubmit=async e=>{e.preventDefault();try{const r=await api('unlock',{code:$('code').value});localStorage.setItem('sonyRemote',r.key);render(await api('state'));report('Phone paired.')}catch(e){report(e.message)}};
 if(location.hostname==='127.0.0.1'||location.hostname==='localhost')setInterval(async()=>{try{$('phoneCode').textContent=(await api('state')).phoneCode}catch{}},30000);
-api('state').then(render).catch(e=>{$('status').textContent='Pair this browser';$('unlock').hidden=false;report('Open the Mac remote and choose Open on iPhone for your pairing code.')});
+let retryTimer;
+async function refreshRemote(){
+ clearTimeout(retryTimer);
+ try{render(await api('state'));report('')}
+ catch(e){
+   const needsCode=e.status===403;
+   $('unlock').hidden=!needsCode;
+   $('status').textContent=needsCode?'Pair this browser':'Reconnecting to Mac…';
+   report(needsCode?'Open the Mac remote and choose Open on iPhone for your pairing code.':'Waiting for the Mac relay. Your pairing is saved.');
+   if(!needsCode)retryTimer=setTimeout(refreshRemote,4000);
+ }
+}
+window.addEventListener('online',refreshRemote);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshRemote()});
+refreshRemote();
 </script></body></html>
